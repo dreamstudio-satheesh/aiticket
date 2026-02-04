@@ -1,0 +1,34 @@
+# FastAPI and server
+fastapi==0.109.0
+uvicorn[standard]==0.27.0
+python-multipart==0.0.6
+
+# Database
+sqlalchemy==2.0.25
+psycopg2-binary==2.9.9
+alembic==1.13.1
+
+# Authentication
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+
+# Validation and settings
+pydantic==2.5.3
+pydantic-settings==2.1.0
+email-validator==2.1.0
+
+# Vector store and AI
+# faiss-cpu==1.7.4  # Commented out - large package
+openai==1.12.0
+# tiktoken==0.5.2  # Commented out - large package
+# sentence-transformers==2.3.1  # Commented out - HUGE package (~2GB with PyTorch/CUDA)
+# torch==2.10.0+cpu -f https://download.pytorch.org/whl/torch_stable.html  # CPU-only option (lighter than CUDA version)
+
+# HTTP client
+httpx==0.26.0
+
+# Encryption
+cryptography==42.0.0
+
+# Utilities
+python-dotenv==1.0.0
