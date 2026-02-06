@@ -3,20 +3,20 @@ import { Sidebar } from './components/Sidebar';
 import { GlassCard } from './components/GlassCard';
 import { LoginScreen } from './components/LoginScreen';
 import { apiService } from './services/apiService';
-import { SystemStatus, Prompt, KnowledgeBaseItem, ChatMessage, User } from './types';
-import { 
-  Activity, 
-  Server, 
-  Zap, 
-  Clock, 
-  Plus, 
-  Edit3, 
-  Trash2, 
-  FileText, 
-  Globe, 
-  Search, 
-  Send, 
-  Bot, 
+import { SystemStatus, PromptVersion, PromptVersionCreate, KnowledgeBaseItem, ChatMessage, User } from './types';
+import {
+  Activity,
+  Server,
+  Zap,
+  Clock,
+  Plus,
+  Edit3,
+  Trash2,
+  FileText,
+  Globe,
+  Search,
+  Send,
+  Bot,
   User as UserIcon,
   MoreHorizontal,
   CheckCircle2,
@@ -25,7 +25,12 @@ import {
   Settings,
   Database,
   LogOut,
-  ChevronRight
+  ChevronRight,
+  Copy,
+  X,
+  Save,
+  Loader2,
+  Eye
 } from 'lucide-react';
 import { HashRouter } from 'react-router-dom';
 
@@ -136,51 +141,591 @@ const DashboardView: React.FC = () => {
 };
 
 // 2. Prompt Engineering View
+const DEFAULT_FORM: PromptVersionCreate = {
+  name: '',
+  version: 'custom',
+  description: '',
+  system_prompt: '',
+  context_template: '',
+  task_template: '',
+  model: 'gpt-4o-mini',
+  temperature: 3,
+  max_tokens: 1000,
+};
+
 const PromptsView: React.FC = () => {
-  const [prompts, setPrompts] = useState<Prompt[]>([]);
+  const [prompts, setPrompts] = useState<PromptVersion[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<number | 'new' | null>(null);
+  const [editMode, setEditMode] = useState(false);
+  const [activeTab, setActiveTab] = useState<'system' | 'context' | 'task'>('system');
+  const [formData, setFormData] = useState<PromptVersionCreate>({ ...DEFAULT_FORM });
+  const [saving, setSaving] = useState(false);
+  const [successMsg, setSuccessMsg] = useState<string | null>(null);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showDuplicateModal, setShowDuplicateModal] = useState(false);
+  const [duplicateName, setDuplicateName] = useState('');
+
+  const isAdmin = apiService.getCurrentUser()?.role === 'admin';
+  const selectedPrompt = typeof selectedId === 'number' ? prompts.find(p => p.id === selectedId) : null;
+
+  const fetchPrompts = async () => {
+    try {
+      setLoading(true);
+      const data = await apiService.getPrompts();
+      setPrompts(data);
+    } catch (e: any) {
+      setError(e.message || 'Failed to load prompts');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
-    apiService.getPrompts().then(setPrompts);
+    fetchPrompts();
   }, []);
 
+  useEffect(() => {
+    if (error) {
+      const t = setTimeout(() => setError(null), 5000);
+      return () => clearTimeout(t);
+    }
+  }, [error]);
+
+  useEffect(() => {
+    if (successMsg) {
+      const t = setTimeout(() => setSuccessMsg(null), 3000);
+      return () => clearTimeout(t);
+    }
+  }, [successMsg]);
+
+  const openCreate = () => {
+    setSelectedId('new');
+    setEditMode(true);
+    setActiveTab('system');
+    setFormData({ ...DEFAULT_FORM });
+  };
+
+  const openDetail = (p: PromptVersion) => {
+    setSelectedId(p.id);
+    setEditMode(false);
+    setActiveTab('system');
+    setShowDeleteConfirm(false);
+  };
+
+  const enterEdit = () => {
+    if (!selectedPrompt) return;
+    setEditMode(true);
+    setFormData({
+      name: selectedPrompt.name,
+      version: selectedPrompt.version,
+      description: selectedPrompt.description || '',
+      system_prompt: selectedPrompt.system_prompt,
+      context_template: selectedPrompt.context_template,
+      task_template: selectedPrompt.task_template,
+      model: selectedPrompt.model,
+      temperature: selectedPrompt.temperature,
+      max_tokens: selectedPrompt.max_tokens,
+    });
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    setError(null);
+    try {
+      if (selectedId === 'new') {
+        const created = await apiService.createPrompt(formData);
+        await fetchPrompts();
+        setSelectedId(created.id);
+        setEditMode(false);
+        setSuccessMsg('Prompt created successfully');
+      } else if (typeof selectedId === 'number') {
+        await apiService.updatePrompt(selectedId, formData);
+        await fetchPrompts();
+        setEditMode(false);
+        setSuccessMsg('Prompt updated successfully');
+      }
+    } catch (e: any) {
+      setError(e.message || 'Failed to save');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (typeof selectedId !== 'number') return;
+    setSaving(true);
+    setError(null);
+    try {
+      await apiService.deletePrompt(selectedId);
+      setSelectedId(null);
+      setShowDeleteConfirm(false);
+      await fetchPrompts();
+      setSuccessMsg('Prompt deleted');
+    } catch (e: any) {
+      setError(e.message || 'Failed to delete');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleSetActive = async () => {
+    if (typeof selectedId !== 'number') return;
+    setSaving(true);
+    setError(null);
+    try {
+      await apiService.setActivePrompt(selectedId);
+      await fetchPrompts();
+      setSuccessMsg('Active prompt updated');
+    } catch (e: any) {
+      setError(e.message || 'Failed to set active');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDuplicate = async () => {
+    if (typeof selectedId !== 'number' || !duplicateName.trim()) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const dup = await apiService.duplicatePrompt(selectedId, duplicateName.trim());
+      setShowDuplicateModal(false);
+      setDuplicateName('');
+      await fetchPrompts();
+      setSelectedId(dup.id);
+      setEditMode(false);
+      setSuccessMsg('Prompt duplicated');
+    } catch (e: any) {
+      setError(e.message || 'Failed to duplicate');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const openDuplicateModal = () => {
+    setDuplicateName(selectedPrompt ? `Copy of ${selectedPrompt.name}` : '');
+    setShowDuplicateModal(true);
+  };
+
+  const getTabContent = (): string => {
+    const source = editMode ? formData : selectedPrompt;
+    if (!source) return '';
+    if (activeTab === 'system') return source.system_prompt;
+    if (activeTab === 'context') return source.context_template;
+    return source.task_template;
+  };
+
+  const setTabContent = (value: string) => {
+    if (activeTab === 'system') setFormData(d => ({ ...d, system_prompt: value }));
+    else if (activeTab === 'context') setFormData(d => ({ ...d, context_template: value }));
+    else setFormData(d => ({ ...d, task_template: value }));
+  };
+
+  // Loading state
+  if (loading && prompts.length === 0) {
+    return (
+      <div className="flex items-center justify-center h-64 animate-fade-in">
+        <Loader2 className="w-8 h-8 text-neon-purple animate-spin" />
+      </div>
+    );
+  }
+
+  // Empty state
+  if (!loading && prompts.length === 0 && selectedId !== 'new') {
+    return (
+      <div className="flex flex-col items-center justify-center h-64 animate-fade-in">
+        <div className="w-16 h-16 rounded-full bg-white/5 flex items-center justify-center mb-4">
+          <Terminal className="w-8 h-8 text-gray-600" />
+        </div>
+        <p className="text-lg text-gray-300 font-medium">No prompts configured</p>
+        <p className="text-sm text-gray-500 mt-1 mb-4">Create your first system prompt to get started.</p>
+        {isAdmin && (
+          <button onClick={openCreate} className="flex items-center gap-2 px-5 py-2.5 bg-neon-purple hover:bg-purple-600 text-white rounded-xl font-medium transition-all">
+            <Plus className="w-4 h-4" /> New Prompt
+          </button>
+        )}
+      </div>
+    );
+  }
+
+  const hasSelection = selectedId !== null;
+
+  // Prompt card renderer
+  const renderCard = (p: PromptVersion, compact: boolean) => (
+    <GlassCard
+      key={p.id}
+      className={`p-4 ${compact ? 'p-3' : 'p-6'} flex flex-col cursor-pointer group ${selectedId === p.id ? 'ring-2 ring-neon-purple/60 border-l-4 border-l-neon-purple' : ''}`}
+      hoverEffect
+    >
+      <div className="flex items-start justify-between mb-3" onClick={() => openDetail(p)}>
+        <div className={`p-2 ${compact ? 'p-1.5' : 'p-3'} rounded-xl ${p.tenant_id === null ? 'bg-blue-500/10 text-blue-400 ring-1 ring-blue-500/20' : 'bg-indigo-500/10 text-indigo-400 ring-1 ring-indigo-500/20'}`}>
+          <Terminal className={compact ? 'w-4 h-4' : 'w-6 h-6'} />
+        </div>
+        <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-all transform translate-x-2 group-hover:translate-x-0">
+          {isAdmin && p.tenant_id !== null && (
+            <>
+              <button onClick={(e) => { e.stopPropagation(); openDetail(p); enterEdit(); }} className="p-1.5 hover:bg-white/10 rounded-lg text-gray-400 hover:text-white transition-colors" title="Edit">
+                <Edit3 className="w-3.5 h-3.5" />
+              </button>
+              <button onClick={(e) => { e.stopPropagation(); setSelectedId(p.id); setShowDeleteConfirm(true); }} className="p-1.5 hover:bg-white/10 rounded-lg text-gray-400 hover:text-red-400 transition-colors" title="Delete">
+                <Trash2 className="w-3.5 h-3.5" />
+              </button>
+            </>
+          )}
+          {isAdmin && (
+            <button onClick={(e) => { e.stopPropagation(); setSelectedId(p.id); setDuplicateName(`Copy of ${p.name}`); setShowDuplicateModal(true); }} className="p-1.5 hover:bg-white/10 rounded-lg text-gray-400 hover:text-white transition-colors" title="Duplicate">
+              <Copy className="w-3.5 h-3.5" />
+            </button>
+          )}
+        </div>
+      </div>
+
+      <div onClick={() => openDetail(p)}>
+        <div className="flex items-center gap-2 flex-wrap mb-1">
+          <h3 className={`${compact ? 'text-sm' : 'text-xl'} font-bold text-white group-hover:text-neon-purple transition-colors`}>{p.name}</h3>
+          <span className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-white/5 text-gray-400 border border-white/10">{p.version}</span>
+        </div>
+
+        <div className="flex items-center gap-2 flex-wrap mb-2">
+          <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-white/5 text-gray-400 border border-white/10">{p.model}</span>
+          {p.is_active && (
+            <span className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-green-500/10 text-green-400 border border-green-500/20">
+              <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" /> ACTIVE
+            </span>
+          )}
+          {p.tenant_id === null && (
+            <span className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-blue-500/10 text-blue-400 border border-blue-500/20">
+              <Globe className="w-2.5 h-2.5" /> Global
+            </span>
+          )}
+        </div>
+
+        {!compact && p.description && (
+          <p className="text-sm text-gray-400 line-clamp-2 leading-relaxed">{p.description}</p>
+        )}
+      </div>
+    </GlassCard>
+  );
+
   return (
-    <div className="space-y-6 animate-fade-in">
+    <div className="space-y-4 animate-fade-in">
+      {/* Banners */}
+      {error && (
+        <div className="flex items-center gap-2 px-4 py-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-sm">
+          <AlertCircle className="w-4 h-4 shrink-0" /> {error}
+        </div>
+      )}
+      {successMsg && (
+        <div className="flex items-center gap-2 px-4 py-3 rounded-xl bg-green-500/10 border border-green-500/20 text-green-400 text-sm">
+          <CheckCircle2 className="w-4 h-4 shrink-0" /> {successMsg}
+        </div>
+      )}
+
+      {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-3xl font-bold text-white tracking-tight">System Prompts</h2>
           <p className="text-gray-400 mt-1">Manage the persona and instructions for your agents.</p>
         </div>
-        <button className="flex items-center gap-2 px-5 py-2.5 bg-neon-purple hover:bg-purple-600 text-white rounded-xl font-medium transition-all shadow-lg shadow-neon-purple/20 hover:scale-105 active:scale-95">
-          <Plus className="w-4 h-4" /> New Prompt
-        </button>
+        {isAdmin && (
+          <button onClick={openCreate} className="flex items-center gap-2 px-5 py-2.5 bg-neon-purple hover:bg-purple-600 text-white rounded-xl font-medium transition-all shadow-lg shadow-neon-purple/20 hover:scale-105 active:scale-95">
+            <Plus className="w-4 h-4" /> New Prompt
+          </button>
+        )}
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {prompts.map((prompt) => (
-          <GlassCard key={prompt.id} className="p-6 flex flex-col h-full group cursor-pointer" hoverEffect>
-            <div className="flex items-start justify-between mb-4">
-              <div className="p-3 rounded-xl bg-indigo-500/10 text-indigo-400 ring-1 ring-indigo-500/20">
-                <Terminal className="w-6 h-6" />
+      {/* Main content */}
+      {!hasSelection ? (
+        /* Full grid when nothing selected */
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {prompts.map(p => renderCard(p, false))}
+        </div>
+      ) : (
+        /* Master-detail split */
+        <div className="flex gap-6">
+          {/* Left: narrow card list */}
+          <div className="w-72 shrink-0 space-y-3 max-h-[calc(100vh-14rem)] overflow-y-auto pr-1">
+            {prompts.map(p => renderCard(p, true))}
+          </div>
+
+          {/* Right: detail panel */}
+          <div className="flex-1 min-w-0">
+            <GlassCard className="p-6">
+              {/* Detail header */}
+              <div className="flex items-start justify-between mb-6">
+                <div>
+                  {selectedId === 'new' ? (
+                    <h3 className="text-xl font-bold text-white">Create New Prompt</h3>
+                  ) : selectedPrompt ? (
+                    <div>
+                      <div className="flex items-center gap-3 mb-1">
+                        <h3 className="text-xl font-bold text-white">{editMode ? 'Editing: ' : ''}{selectedPrompt.name}</h3>
+                        {selectedPrompt.tenant_id === null && (
+                          <span className="flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-blue-500/10 text-blue-400 border border-blue-500/20">
+                            <Globe className="w-3 h-3" /> Global
+                          </span>
+                        )}
+                        {selectedPrompt.is_active && (
+                          <span className="flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-green-500/10 text-green-400 border border-green-500/20">
+                            <span className="w-1.5 h-1.5 rounded-full bg-green-500" /> Active
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-sm text-gray-400">{selectedPrompt.description || 'No description'}</p>
+                    </div>
+                  ) : null}
+                </div>
+                <button onClick={() => { setSelectedId(null); setEditMode(false); setShowDeleteConfirm(false); }} className="p-2 hover:bg-white/10 rounded-lg text-gray-400 hover:text-white transition-colors">
+                  <X className="w-5 h-5" />
+                </button>
               </div>
-              <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-all transform translate-x-2 group-hover:translate-x-0">
-                 <button className="p-2 hover:bg-white/10 rounded-lg text-gray-400 hover:text-white transition-colors"><Edit3 className="w-4 h-4" /></button>
-                 <button className="p-2 hover:bg-white/10 rounded-lg text-gray-400 hover:text-red-400 transition-colors"><Trash2 className="w-4 h-4" /></button>
+
+              {/* Name & description fields in edit/create mode */}
+              {editMode && (
+                <div className="grid grid-cols-2 gap-4 mb-4">
+                  <div>
+                    <label className="text-xs text-gray-400 block mb-1 font-medium">Name</label>
+                    <input
+                      type="text"
+                      value={formData.name}
+                      onChange={e => setFormData(d => ({ ...d, name: e.target.value }))}
+                      className="w-full bg-space-900/50 border border-white/10 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-neon-purple/50"
+                      placeholder="Prompt name"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs text-gray-400 block mb-1 font-medium">Description</label>
+                    <input
+                      type="text"
+                      value={formData.description || ''}
+                      onChange={e => setFormData(d => ({ ...d, description: e.target.value }))}
+                      className="w-full bg-space-900/50 border border-white/10 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-neon-purple/50"
+                      placeholder="Optional description"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* Tab bar */}
+              <div className="flex gap-1 mb-4 bg-white/5 rounded-lg p-1">
+                {([['system', 'System Prompt'], ['context', 'Context Template'], ['task', 'Task Template']] as const).map(([key, label]) => (
+                  <button
+                    key={key}
+                    onClick={() => setActiveTab(key)}
+                    className={`flex-1 px-4 py-2 rounded-md text-sm font-medium transition-all ${
+                      activeTab === key
+                        ? 'bg-white/10 text-white border border-white/5'
+                        : 'text-gray-400 hover:text-white hover:bg-white/5'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
               </div>
+
+              {/* Template content */}
+              <div className="mb-4">
+                {editMode ? (
+                  <textarea
+                    value={getTabContent()}
+                    onChange={e => setTabContent(e.target.value)}
+                    className="w-full font-mono text-sm text-gray-300 bg-space-900/50 border border-white/10 rounded-xl p-4 focus:outline-none focus:border-neon-purple/50 whitespace-pre-wrap resize-y"
+                    style={{ minHeight: '300px' }}
+                    placeholder={`Enter ${activeTab === 'system' ? 'system prompt' : activeTab === 'context' ? 'context template' : 'task template'}...`}
+                  />
+                ) : (
+                  <div className="bg-space-900/50 border border-white/10 rounded-xl p-4" style={{ minHeight: '200px' }}>
+                    <pre className="font-mono text-sm text-gray-300 whitespace-pre-wrap">{getTabContent() || '(empty)'}</pre>
+                  </div>
+                )}
+              </div>
+
+              {/* Settings row */}
+              <div className="flex items-center gap-6 mb-6 p-4 bg-white/5 rounded-xl border border-white/10">
+                <div>
+                  <label className="text-xs text-gray-400 block mb-1 font-medium">Model</label>
+                  {editMode ? (
+                    <select
+                      value={formData.model}
+                      onChange={e => setFormData(d => ({ ...d, model: e.target.value }))}
+                      className="bg-space-900 border border-white/10 rounded-lg px-3 py-1.5 text-sm text-gray-300 outline-none focus:border-neon-purple/50"
+                    >
+                      <option value="gpt-4o-mini">gpt-4o-mini</option>
+                      <option value="gpt-4o">gpt-4o</option>
+                      <option value="gpt-4-turbo">gpt-4-turbo</option>
+                    </select>
+                  ) : (
+                    <span className="px-2 py-1 rounded text-xs font-mono bg-white/5 text-gray-300 border border-white/10">
+                      {selectedPrompt?.model || formData.model}
+                    </span>
+                  )}
+                </div>
+                <div>
+                  <label className="text-xs text-gray-400 block mb-1 font-medium">Temperature</label>
+                  {editMode ? (
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="range"
+                        min={0}
+                        max={10}
+                        value={formData.temperature}
+                        onChange={e => setFormData(d => ({ ...d, temperature: Number(e.target.value) }))}
+                        className="w-24 h-1 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-neon-purple"
+                      />
+                      <span className="text-sm text-neon-blue font-mono w-8">{((formData.temperature ?? 3) / 10).toFixed(1)}</span>
+                    </div>
+                  ) : (
+                    <span className="text-sm text-gray-300 font-mono">{((selectedPrompt?.temperature ?? 0) / 10).toFixed(1)}</span>
+                  )}
+                </div>
+                <div>
+                  <label className="text-xs text-gray-400 block mb-1 font-medium">Max Tokens</label>
+                  {editMode ? (
+                    <input
+                      type="number"
+                      value={formData.max_tokens}
+                      onChange={e => setFormData(d => ({ ...d, max_tokens: Number(e.target.value) }))}
+                      className="w-24 bg-space-900 border border-white/10 rounded-lg px-3 py-1.5 text-sm text-gray-300 outline-none focus:border-neon-purple/50"
+                      min={100}
+                      max={16000}
+                    />
+                  ) : (
+                    <span className="text-sm text-gray-300 font-mono">{selectedPrompt?.max_tokens ?? '-'}</span>
+                  )}
+                </div>
+              </div>
+
+              {/* Action buttons */}
+              <div className="flex items-center gap-3 border-t border-white/10 pt-4">
+                {editMode ? (
+                  <>
+                    <button
+                      onClick={handleSave}
+                      disabled={saving || !formData.name.trim() || !formData.system_prompt.trim()}
+                      className="flex items-center gap-2 px-5 py-2 bg-neon-purple hover:bg-purple-600 text-white rounded-xl font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                      {selectedId === 'new' ? 'Create Prompt' : 'Save Changes'}
+                    </button>
+                    <button
+                      onClick={() => { setEditMode(false); if (selectedId === 'new') setSelectedId(null); }}
+                      disabled={saving}
+                      className="px-5 py-2 bg-white/5 hover:bg-white/10 text-gray-300 rounded-xl font-medium transition-all border border-white/10"
+                    >
+                      Cancel
+                    </button>
+                  </>
+                ) : selectedPrompt && isAdmin ? (
+                  <>
+                    {!selectedPrompt.is_active && (
+                      <button
+                        onClick={handleSetActive}
+                        disabled={saving}
+                        className="flex items-center gap-2 px-4 py-2 bg-neon-purple hover:bg-purple-600 text-white rounded-xl font-medium transition-all disabled:opacity-50"
+                      >
+                        {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
+                        Set as Active
+                      </button>
+                    )}
+                    {selectedPrompt.tenant_id !== null && (
+                      <button
+                        onClick={enterEdit}
+                        className="flex items-center gap-2 px-4 py-2 bg-white/5 hover:bg-white/10 text-white rounded-xl font-medium transition-all border border-white/10"
+                      >
+                        <Edit3 className="w-4 h-4" /> Edit
+                      </button>
+                    )}
+                    <button
+                      onClick={openDuplicateModal}
+                      className="flex items-center gap-2 px-4 py-2 bg-white/5 hover:bg-white/10 text-white rounded-xl font-medium transition-all border border-white/10"
+                    >
+                      <Copy className="w-4 h-4" /> Duplicate
+                    </button>
+                    {selectedPrompt.tenant_id !== null && !showDeleteConfirm && (
+                      <button
+                        onClick={() => setShowDeleteConfirm(true)}
+                        className="flex items-center gap-2 px-4 py-2 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-xl font-medium transition-all border border-red-500/20 ml-auto"
+                      >
+                        <Trash2 className="w-4 h-4" /> Delete
+                      </button>
+                    )}
+                  </>
+                ) : selectedPrompt ? (
+                  <button
+                    onClick={() => { setSelectedId(null); }}
+                    className="flex items-center gap-2 px-4 py-2 bg-white/5 hover:bg-white/10 text-gray-300 rounded-xl font-medium transition-all border border-white/10"
+                  >
+                    <Eye className="w-4 h-4" /> View Only
+                  </button>
+                ) : null}
+              </div>
+
+              {/* Delete confirmation */}
+              {showDeleteConfirm && selectedPrompt && (
+                <div className="mt-4 p-4 bg-red-500/10 border border-red-500/20 rounded-xl">
+                  <p className="text-sm text-red-400 mb-3">Are you sure you want to delete <strong>{selectedPrompt.name}</strong>? This cannot be undone.</p>
+                  <div className="flex gap-3">
+                    <button
+                      onClick={handleDelete}
+                      disabled={saving}
+                      className="flex items-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg font-medium transition-all disabled:opacity-50"
+                    >
+                      {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+                      Confirm Delete
+                    </button>
+                    <button
+                      onClick={() => setShowDeleteConfirm(false)}
+                      disabled={saving}
+                      className="px-4 py-2 bg-white/5 hover:bg-white/10 text-gray-300 rounded-lg font-medium transition-all"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
+            </GlassCard>
+          </div>
+        </div>
+      )}
+
+      {/* Duplicate modal */}
+      {showDuplicateModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={() => setShowDuplicateModal(false)}>
+          <GlassCard className="p-6 w-full max-w-md" onClick={(e: React.MouseEvent) => e.stopPropagation()}>
+            <h3 className="text-lg font-bold text-white mb-4">Duplicate Prompt</h3>
+            <div className="mb-4">
+              <label className="text-xs text-gray-400 block mb-1 font-medium">New Name</label>
+              <input
+                type="text"
+                value={duplicateName}
+                onChange={e => setDuplicateName(e.target.value)}
+                className="w-full bg-space-900/50 border border-white/10 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-neon-purple/50"
+                placeholder="Enter name for the copy"
+                autoFocus
+                onKeyDown={e => e.key === 'Enter' && handleDuplicate()}
+              />
             </div>
-            
-            <h3 className="text-xl font-bold text-white mb-2 group-hover:text-neon-purple transition-colors">{prompt.name}</h3>
-            <p className="text-sm text-gray-400 line-clamp-2 mb-6 flex-1 leading-relaxed">{prompt.description}</p>
-            
-            <div className="flex items-center justify-between pt-4 border-t border-white/10">
-              <span className="px-2.5 py-1 rounded-md text-xs font-mono bg-white/5 text-gray-300 border border-white/10">v{prompt.version}.0</span>
-              <span className="text-xs text-gray-500 flex items-center gap-1">
-                <Clock className="w-3 h-3" />
-                {new Date(prompt.lastUpdated).toLocaleDateString()}
-              </span>
+            <div className="flex gap-3 justify-end">
+              <button
+                onClick={() => setShowDuplicateModal(false)}
+                className="px-4 py-2 bg-white/5 hover:bg-white/10 text-gray-300 rounded-lg font-medium transition-all border border-white/10"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleDuplicate}
+                disabled={saving || !duplicateName.trim()}
+                className="flex items-center gap-2 px-4 py-2 bg-neon-purple hover:bg-purple-600 text-white rounded-lg font-medium transition-all disabled:opacity-50"
+              >
+                {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Copy className="w-4 h-4" />}
+                Duplicate
+              </button>
             </div>
           </GlassCard>
-        ))}
-      </div>
+        </div>
+      )}
     </div>
   );
 };
@@ -311,7 +856,7 @@ const ChatPlaygroundView: React.FC = () => {
                  </div>
                  <div>
                     <h3 className="font-semibold text-white text-sm">Support Agent</h3>
-                    <p className="text-xs text-gray-400">Model: v3.0 • Confidence > 85%</p>
+                    <p className="text-xs text-gray-400">Model: v3.0 • Confidence {'>'} 85%</p>
                  </div>
                </div>
                <button className="text-xs text-neon-purple hover:text-white transition-colors" onClick={() => setMessages([])}>Clear Context</button>
@@ -516,7 +1061,7 @@ const App: React.FC = () => {
                 {currentUser && (
                     <div className="text-right hidden sm:block">
                         <p className="text-sm font-medium text-white">{currentUser.name}</p>
-                        <p className="text-xs text-neon-purple uppercase tracking-wider">{currentUser.role}</p>
+                        <p className="text-xs text-neon-purple uppercase tracking-wider">{currentUser.role.replace('_', ' ')}</p>
                     </div>
                 )}
                <div className="h-9 w-9 rounded-full bg-gradient-to-tr from-neon-blue to-purple-600 border border-white/20 shadow-lg shadow-purple-500/20 flex items-center justify-center text-white font-bold cursor-pointer hover:scale-105 transition-transform">

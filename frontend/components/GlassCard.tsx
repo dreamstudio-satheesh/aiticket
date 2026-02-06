@@ -4,11 +4,13 @@ interface GlassCardProps {
   children: React.ReactNode;
   className?: string;
   hoverEffect?: boolean;
+  onClick?: (e: React.MouseEvent) => void;
 }
 
-export const GlassCard: React.FC<GlassCardProps> = ({ children, className = '', hoverEffect = false }) => {
+export const GlassCard: React.FC<GlassCardProps> = ({ children, className = '', hoverEffect = false, onClick }) => {
   return (
     <div
+      onClick={onClick}
       className={`
         relative overflow-hidden rounded-2xl
         bg-space-800/40 backdrop-blur-xl

@@ -1,12 +1,12 @@
-import { Prompt, KnowledgeBaseItem, ChatMessage, SystemStatus, AuthResponse, User } from '../types';
+import { PromptVersion, PromptVersionCreate, PromptVersionUpdate, KnowledgeBaseItem, ChatMessage, SystemStatus, AuthResponse, User } from '../types';
 
 const API_BASE_URL = 'http://localhost:8000/api/v1';
 
 // Mock Data for fallback
-const MOCK_PROMPTS: Prompt[] = [
-  { id: '1', name: 'Support Agent V1', description: 'Standard customer support responses', content: 'You are a helpful support agent...', version: 3, lastUpdated: '2023-10-25T10:00:00Z' },
-  { id: '2', name: 'Billing Specialist', description: 'Handles refunds and invoicing', content: 'You are an expert in finance...', version: 1, lastUpdated: '2023-10-24T14:30:00Z' },
-  { id: '3', name: 'Technical Diagnostics', description: 'Deep dive into error logs', content: 'Analyze the following stack trace...', version: 5, lastUpdated: '2023-10-26T09:15:00Z' },
+const MOCK_PROMPTS: PromptVersion[] = [
+  { id: 1, tenant_id: null, version: '1.0.0', name: 'Support Agent V1', description: 'Standard customer support responses', system_prompt: 'You are a helpful support agent...', context_template: 'Use the following context:\n{context}', task_template: 'Answer the following ticket:\n{ticket}', model: 'gpt-4o-mini', temperature: 3, max_tokens: 1000, is_active: false, is_default: true, performance_metrics: null, created_at: '2023-10-25T10:00:00Z', updated_at: '2023-10-25T10:00:00Z' },
+  { id: 2, tenant_id: null, version: '1.0.0', name: 'Billing Specialist', description: 'Handles refunds and invoicing', system_prompt: 'You are an expert in finance...', context_template: 'Use the following context:\n{context}', task_template: 'Handle the billing query:\n{ticket}', model: 'gpt-4o-mini', temperature: 3, max_tokens: 1000, is_active: false, is_default: false, performance_metrics: null, created_at: '2023-10-24T14:30:00Z', updated_at: '2023-10-24T14:30:00Z' },
+  { id: 3, tenant_id: null, version: '2.0.0', name: 'Technical Diagnostics', description: 'Deep dive into error logs', system_prompt: 'Analyze the following stack trace...', context_template: 'Use the following context:\n{context}', task_template: 'Diagnose the issue:\n{ticket}', model: 'gpt-4o', temperature: 5, max_tokens: 2000, is_active: false, is_default: false, performance_metrics: null, created_at: '2023-10-26T09:15:00Z', updated_at: '2023-10-26T09:15:00Z' },
 ];
 
 const MOCK_KB: KnowledgeBaseItem[] = [
@@ -34,7 +34,7 @@ const MOCK_USER: User = {
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 // Helper to determine if we should use mock
-const shouldMock = true; // Set to false to try actual API first in production
+const shouldMock = false;
 
 const getHeaders = () => {
   const token = localStorage.getItem('auth_token');
@@ -46,33 +46,54 @@ const getHeaders = () => {
 
 export const apiService = {
   login: async (email: string, password: string): Promise<AuthResponse> => {
-    if (shouldMock) {
-      await delay(1200);
-      if (email === 'admin@demo.com' && password === 'password') {
-        const response: AuthResponse = {
-          access_token: 'mock_jwt_token_xyz_123',
-          token_type: 'bearer',
-          user: MOCK_USER
-        };
-        localStorage.setItem('auth_token', response.access_token);
-        localStorage.setItem('user', JSON.stringify(response.user));
-        return response;
-      }
-      throw new Error('Invalid credentials');
-    }
-    
-    // Real implementation would look like:
-    /*
+    // Step 1: POST form-encoded credentials to /auth/login
     const formData = new URLSearchParams();
     formData.append('username', email);
     formData.append('password', password);
-    const res = await fetch(`${API_BASE_URL}/auth/token`, {
-       method: 'POST',
-       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-       body: formData
+
+    const tokenRes = await fetch(`${API_BASE_URL}/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: formData,
     });
-    */
-    throw new Error('Real API not connected');
+
+    if (!tokenRes.ok) {
+      const err = await tokenRes.json().catch(() => ({}));
+      throw new Error(err.detail || 'Invalid credentials');
+    }
+
+    const tokenData = await tokenRes.json();
+    const accessToken: string = tokenData.access_token;
+
+    // Step 2: GET /auth/me to fetch user profile
+    const meRes = await fetch(`${API_BASE_URL}/auth/me`, {
+      headers: { 'Authorization': `Bearer ${accessToken}` },
+    });
+
+    if (!meRes.ok) {
+      throw new Error('Failed to fetch user profile');
+    }
+
+    const profile = await meRes.json();
+
+    // Step 3: Map backend shape to frontend User
+    const user: User = {
+      id: String(profile.id),
+      email: profile.email,
+      name: profile.full_name || profile.email,
+      tenant_id: String(profile.tenant_id),
+      role: profile.role,
+    };
+
+    const response: AuthResponse = {
+      access_token: accessToken,
+      token_type: 'bearer',
+      user,
+    };
+
+    localStorage.setItem('auth_token', response.access_token);
+    localStorage.setItem('user', JSON.stringify(response.user));
+    return response;
   },
 
   logout: () => {
@@ -104,7 +125,7 @@ export const apiService = {
     }
   },
 
-  getPrompts: async (): Promise<Prompt[]> => {
+  getPrompts: async (): Promise<PromptVersion[]> => {
     if (shouldMock) {
       await delay(600);
       return MOCK_PROMPTS;
@@ -116,6 +137,81 @@ export const apiService = {
     } catch (e) {
       return MOCK_PROMPTS;
     }
+  },
+
+  getPrompt: async (id: number): Promise<PromptVersion> => {
+    const res = await fetch(`${API_BASE_URL}/prompts/${id}`, { headers: getHeaders() });
+    if (!res.ok) throw new Error('Failed to fetch prompt');
+    return await res.json();
+  },
+
+  getActivePrompt: async (): Promise<PromptVersion> => {
+    const res = await fetch(`${API_BASE_URL}/prompts/active`, { headers: getHeaders() });
+    if (!res.ok) throw new Error('Failed to fetch active prompt');
+    return await res.json();
+  },
+
+  setActivePrompt: async (promptId: number): Promise<PromptVersion> => {
+    const res = await fetch(`${API_BASE_URL}/prompts/active`, {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify({ prompt_id: promptId }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || 'Failed to set active prompt');
+    }
+    return await res.json();
+  },
+
+  createPrompt: async (data: PromptVersionCreate): Promise<PromptVersion> => {
+    const res = await fetch(`${API_BASE_URL}/prompts`, {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || 'Failed to create prompt');
+    }
+    return await res.json();
+  },
+
+  updatePrompt: async (id: number, data: PromptVersionUpdate): Promise<PromptVersion> => {
+    const res = await fetch(`${API_BASE_URL}/prompts/${id}`, {
+      method: 'PUT',
+      headers: getHeaders(),
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || 'Failed to update prompt');
+    }
+    return await res.json();
+  },
+
+  deletePrompt: async (id: number): Promise<void> => {
+    const res = await fetch(`${API_BASE_URL}/prompts/${id}`, {
+      method: 'DELETE',
+      headers: getHeaders(),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || 'Failed to delete prompt');
+    }
+  },
+
+  duplicatePrompt: async (promptId: number, newName: string): Promise<PromptVersion> => {
+    const res = await fetch(`${API_BASE_URL}/prompts/duplicate`, {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify({ prompt_id: promptId, new_name: newName }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || 'Failed to duplicate prompt');
+    }
+    return await res.json();
   },
 
   getKnowledgeBase: async (): Promise<KnowledgeBaseItem[]> => {
@@ -133,27 +229,24 @@ export const apiService = {
   },
 
   generateReply: async (text: string): Promise<ChatMessage> => {
-    if (shouldMock) {
-      await delay(1500);
-      return {
-        id: Date.now().toString(),
-        role: 'assistant',
-        content: `Here is a draft response based on your policy:\n\n"Thank you for contacting us regarding '${text.substring(0, 15)}...'. We understand your concern and would be happy to assist you..."\n\nIs there anything else I can help with?`,
-        confidence: 0.92,
-        timestamp: Date.now(),
-      };
+    const res = await fetch(`${API_BASE_URL}/playground/generate`, {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify({ subject: 'Playground Query', content: text, use_reranking: true }),
+    });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || 'Failed to generate reply');
     }
-    try {
-      const res = await fetch(`${API_BASE_URL}/replies/generate`, {
-        method: 'POST',
-        headers: getHeaders(),
-        body: JSON.stringify({ text }),
-      });
-      if (!res.ok) throw new Error('Network response was not ok');
-      return await res.json();
-    } catch (e) {
-      console.error(e);
-      throw e;
-    }
+
+    const data = await res.json();
+    return {
+      id: data.id,
+      role: data.role,
+      content: data.content,
+      confidence: data.confidence,
+      timestamp: data.timestamp,
+    };
   }
 };

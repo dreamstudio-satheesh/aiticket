@@ -1,6 +1,5 @@
 import os
 import json
-import faiss
 import numpy as np
 from typing import List, Dict, Optional, Tuple
 from pathlib import Path
@@ -11,7 +10,7 @@ DATA_DIR = Path("data/indexes")
 
 
 class FAISSStore:
-    """FAISS vector store with metadata support."""
+    """Simple numpy-based vector store with cosine similarity search."""
 
     def __init__(self, name: str, tenant_id: Optional[int] = None):
         self.name = name
@@ -22,23 +21,22 @@ class FAISSStore:
         self.index_dir = DATA_DIR / (f"tenant_{tenant_id}" if tenant_id else "global")
         self.index_dir.mkdir(parents=True, exist_ok=True)
 
-        self.index_path = self.index_dir / f"{name}.index"
+        self.index_path = self.index_dir / f"{name}.npy"
         self.metadata_path = self.index_dir / f"{name}_metadata.json"
 
         # Initialize or load
-        self.index: faiss.IndexFlatIP = None
+        self.embeddings: np.ndarray = None
         self.metadata: List[Dict] = []
         self._load_or_create()
 
     def _load_or_create(self):
         """Load existing index or create new one."""
-        if self.index_path.exists():
-            self.index = faiss.read_index(str(self.index_path))
+        if self.index_path.exists() and self.metadata_path.exists():
+            self.embeddings = np.load(str(self.index_path))
             with open(self.metadata_path, 'r', encoding='utf-8') as f:
                 self.metadata = json.load(f)
         else:
-            # IndexFlatIP for inner product (cosine sim with normalized vectors)
-            self.index = faiss.IndexFlatIP(self.dimension)
+            self.embeddings = np.zeros((0, self.dimension), dtype=np.float32)
             self.metadata = []
 
     def add(self, texts: List[str], metadata_list: List[Dict] = None):
@@ -46,8 +44,12 @@ class FAISSStore:
         if not texts:
             return
 
-        embeddings = embed_texts(texts)
-        self.index.add(embeddings.astype(np.float32))
+        new_embeddings = embed_texts(texts)
+
+        if self.embeddings.shape[0] == 0:
+            self.embeddings = new_embeddings.astype(np.float32)
+        else:
+            self.embeddings = np.vstack([self.embeddings, new_embeddings.astype(np.float32)])
 
         # Store metadata
         for i, text in enumerate(texts):
@@ -60,35 +62,46 @@ class FAISSStore:
         self._save()
 
     def search(self, query: str, top_k: int = 5, score_threshold: float = 0.0) -> List[Tuple[Dict, float]]:
-        """Search for similar texts. Returns list of (metadata, score) tuples."""
-        if self.index.ntotal == 0:
+        """Search for similar texts using cosine similarity. Returns list of (metadata, score) tuples."""
+        if self.embeddings.shape[0] == 0:
             return []
 
-        query_embedding = embed_query(query).astype(np.float32).reshape(1, -1)
-        scores, indices = self.index.search(query_embedding, min(top_k, self.index.ntotal))
+        query_embedding = embed_query(query).astype(np.float32)
+
+        # Normalize for cosine similarity
+        query_norm = query_embedding / (np.linalg.norm(query_embedding) + 1e-9)
+        embed_norms = self.embeddings / (np.linalg.norm(self.embeddings, axis=1, keepdims=True) + 1e-9)
+
+        # Cosine similarity (dot product of normalized vectors)
+        scores = np.dot(embed_norms, query_norm)
+
+        # Get top-k indices
+        top_k = min(top_k, len(scores))
+        top_indices = np.argsort(scores)[::-1][:top_k]
 
         results = []
-        for score, idx in zip(scores[0], indices[0]):
-            if idx >= 0 and score >= score_threshold:
-                results.append((self.metadata[idx], float(score)))
+        for idx in top_indices:
+            score = float(scores[idx])
+            if score >= score_threshold:
+                results.append((self.metadata[idx], score))
 
         return results
 
     def _save(self):
-        """Persist index and metadata to disk."""
-        faiss.write_index(self.index, str(self.index_path))
+        """Persist embeddings and metadata to disk."""
+        np.save(str(self.index_path), self.embeddings)
         with open(self.metadata_path, 'w', encoding='utf-8') as f:
             json.dump(self.metadata, f, ensure_ascii=False, indent=2)
 
     def clear(self):
         """Clear all data from the index."""
-        self.index = faiss.IndexFlatIP(self.dimension)
+        self.embeddings = np.zeros((0, self.dimension), dtype=np.float32)
         self.metadata = []
         self._save()
 
     @property
     def count(self) -> int:
-        return self.index.ntotal
+        return self.embeddings.shape[0]
 
 
 # Global index singletons

@@ -11,6 +11,7 @@ alembic==1.13.1
 # Authentication
 python-jose[cryptography]==3.3.0
 passlib[bcrypt]==1.7.4
+bcrypt==4.0.1
 
 # Validation and settings
 pydantic==2.5.3
@@ -18,11 +19,9 @@ pydantic-settings==2.1.0
 email-validator==2.1.0
 
 # Vector store and AI
-# faiss-cpu==1.7.4  # Commented out - large package
-openai==1.12.0
-# tiktoken==0.5.2  # Commented out - large package
-# sentence-transformers==2.3.1  # Commented out - HUGE package (~2GB with PyTorch/CUDA)
-# torch==2.10.0+cpu -f https://download.pytorch.org/whl/torch_stable.html  # CPU-only option (lighter than CUDA version)
+numpy>=1.24.0
+openai>=1.12.0
+tiktoken>=0.5.2
 
 # HTTP client
 httpx==0.26.0

@@ -17,7 +17,21 @@ python seed_prompts.py
 python ingest_global_kb.py
 ```
 
-### Run Development Server
+### Docker (primary development method)
+```bash
+docker compose up -d --build        # Build and start all services
+docker compose up -d --build app    # Rebuild only the app service
+docker compose down                 # Stop all services
+docker compose down -v              # Stop and delete volumes (fresh DB on next start)
+docker logs aiagent-app-1 --tail 50 # View app logs
+docker exec aiagent-app-1 bash      # Shell into app container
+docker exec aiagent-db-1 psql -U postgres -d aiagent  # Connect to PostgreSQL
+docker ps                           # List running containers
+```
+
+On fresh volume, `entrypoint.sh` auto-runs: `init_database.py` → `seed_prompts.py` → `seed_users.py` (creates demo tenant + users).
+
+### Run Development Server (without Docker)
 ```bash
 uvicorn app.main:app --reload
 ```
@@ -67,7 +81,7 @@ Approve Reply → Analyze Edit
 Core models in `app/models/`: Tenant, User, Ticket, AIReply, ApprovedReply, PromptVersion, RerankingConfig, KBArticle, AuditLog
 
 ### API Structure
-All routes in `app/api/v1/`: auth, kb, search, prompts, whmcs, replies, analytics, examples, corrections, weights
+All routes in `app/api/v1/`: auth, kb, search, prompts, whmcs, replies, analytics, examples, corrections, weights, playground
 
 ## Design Principles
 

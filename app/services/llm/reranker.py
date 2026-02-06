@@ -1,18 +1,15 @@
 from typing import List, Tuple, Optional
-from sentence_transformers import CrossEncoder
+import numpy as np
 
+from app.services.embeddings.embedding_service import embed_texts, embed_query
 from app.services.knowledge.unified_retrieval import RetrievalResult
 
-# Singleton reranker model
-_reranker: Optional[CrossEncoder] = None
 
-
-def get_reranker() -> CrossEncoder:
-    """Get or initialize cross-encoder reranker."""
-    global _reranker
-    if _reranker is None:
-        _reranker = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2")
-    return _reranker
+def _cosine_similarities(query_embedding: np.ndarray, doc_embeddings: np.ndarray) -> np.ndarray:
+    """Compute cosine similarity between query and each document."""
+    query_norm = query_embedding / (np.linalg.norm(query_embedding) + 1e-9)
+    doc_norms = doc_embeddings / (np.linalg.norm(doc_embeddings, axis=1, keepdims=True) + 1e-9)
+    return np.dot(doc_norms, query_norm)
 
 
 def rerank_results(
@@ -22,25 +19,23 @@ def rerank_results(
     score_threshold: float = 0.0,
 ) -> List[RetrievalResult]:
     """
-    Rerank retrieval results using cross-encoder.
-    More accurate than bi-encoder but slower.
+    Rerank retrieval results using OpenAI embeddings cosine similarity.
+    Re-embeds query and documents for a fresh similarity comparison.
     """
     if not results:
         return []
 
-    reranker = get_reranker()
+    # Embed query and all result contents via OpenAI
+    query_embedding = embed_query(query)
+    doc_embeddings = embed_texts([r.content for r in results])
 
-    # Prepare pairs for reranking
-    pairs = [(query, r.content) for r in results]
+    # Compute cosine similarity scores
+    scores = _cosine_similarities(query_embedding, doc_embeddings)
 
-    # Get reranker scores
-    scores = reranker.predict(pairs)
-
-    # Attach scores and sort
+    # Attach scores and filter
     scored_results = []
     for result, score in zip(results, scores):
         if score >= score_threshold:
-            # Create new result with reranked score
             scored_results.append(RetrievalResult(
                 content=result.content,
                 score=float(score),

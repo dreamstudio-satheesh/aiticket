@@ -3,7 +3,7 @@ export interface User {
   email: string;
   name: string;
   tenant_id: string;
-  role: 'admin' | 'support' | 'manager';
+  role: 'admin' | 'support_agent' | 'manager';
 }
 
 export interface AuthResponse {
@@ -12,13 +12,46 @@ export interface AuthResponse {
   user: User;
 }
 
-export interface Prompt {
-  id: string;
+export interface PromptVersion {
+  id: number;
+  tenant_id: number | null;
+  version: string;
   name: string;
-  description: string;
-  content: string;
-  version: number;
-  lastUpdated: string;
+  description: string | null;
+  system_prompt: string;
+  context_template: string;
+  task_template: string;
+  model: string;
+  temperature: number;
+  max_tokens: number;
+  is_active: boolean;
+  is_default: boolean;
+  performance_metrics: Record<string, any> | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PromptVersionCreate {
+  name: string;
+  version?: string;
+  description?: string;
+  system_prompt: string;
+  context_template: string;
+  task_template: string;
+  model?: string;
+  temperature?: number;
+  max_tokens?: number;
+}
+
+export interface PromptVersionUpdate {
+  name?: string;
+  description?: string;
+  system_prompt?: string;
+  context_template?: string;
+  task_template?: string;
+  model?: string;
+  temperature?: number;
+  max_tokens?: number;
 }
 
 export interface KnowledgeBaseItem {
