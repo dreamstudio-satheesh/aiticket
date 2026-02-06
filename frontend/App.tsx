@@ -809,7 +809,23 @@ const ChatPlaygroundView: React.FC = () => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
+  const [prompts, setPrompts] = useState<PromptVersion[]>([]);
+  const [selectedPromptId, setSelectedPromptId] = useState<number | null>(null);
+  const [temperature, setTemperature] = useState(3);
+  const [model, setModel] = useState('gpt-4o-mini');
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    apiService.getPrompts().then(data => {
+      setPrompts(data);
+      const active = data.find(p => p.is_active) || data[0];
+      if (active) {
+        setSelectedPromptId(active.id);
+        setTemperature(active.temperature);
+        setModel(active.model);
+      }
+    }).catch(() => {});
+  }, []);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -817,25 +833,42 @@ const ChatPlaygroundView: React.FC = () => {
     }
   }, [messages]);
 
+  const selectedPrompt = prompts.find(p => p.id === selectedPromptId);
+
+  const handlePromptChange = (id: number) => {
+    setSelectedPromptId(id);
+    const prompt = prompts.find(p => p.id === id);
+    if (prompt) {
+      setTemperature(prompt.temperature);
+      setModel(prompt.model);
+    }
+  };
+
   const handleSend = async () => {
     if (!input.trim()) return;
-    
+
     const userMsg: ChatMessage = {
       id: Date.now().toString(),
       role: 'user',
       content: input,
       timestamp: Date.now()
     };
-    
+
     setMessages(prev => [...prev, userMsg]);
     setInput('');
     setLoading(true);
 
     try {
-      const response = await apiService.generateReply(userMsg.content);
+      const response = await apiService.generateReply(userMsg.content, selectedPromptId, temperature, model);
       setMessages(prev => [...prev, response]);
-    } catch (e) {
-      // Error handling
+    } catch (e: any) {
+      const errorMsg: ChatMessage = {
+        id: Date.now().toString(),
+        role: 'assistant',
+        content: `Error: ${e.message || 'Failed to generate reply'}`,
+        timestamp: Date.now()
+      };
+      setMessages(prev => [...prev, errorMsg]);
     } finally {
       setLoading(false);
     }
@@ -855,8 +888,8 @@ const ChatPlaygroundView: React.FC = () => {
                    </div>
                  </div>
                  <div>
-                    <h3 className="font-semibold text-white text-sm">Support Agent</h3>
-                    <p className="text-xs text-gray-400">Model: v3.0 • Confidence {'>'} 85%</p>
+                    <h3 className="font-semibold text-white text-sm">{selectedPrompt?.name || 'AI Playground'}</h3>
+                    <p className="text-xs text-gray-400">{model} • temp {(temperature / 10).toFixed(1)}</p>
                  </div>
                </div>
                <button className="text-xs text-neon-purple hover:text-white transition-colors" onClick={() => setMessages([])}>Clear Context</button>
@@ -944,38 +977,69 @@ const ChatPlaygroundView: React.FC = () => {
          </GlassCard>
       </div>
       
-      {/* Context Panel (Sidebar for Playgound) */}
+      {/* Context Panel (Sidebar for Playground) */}
       <div className="w-80 hidden xl:flex flex-col gap-6">
          <GlassCard className="p-6">
             <h3 className="text-white font-semibold mb-4 flex items-center gap-2">
               <Settings className="w-4 h-4 text-neon-blue" />
               Controls
             </h3>
-            <div className="space-y-6">
+            <div className="space-y-5">
+               <div>
+                  <label className="text-xs text-gray-400 block mb-2 font-medium">System Prompt</label>
+                  <div className="relative">
+                    <select
+                      value={selectedPromptId || ''}
+                      onChange={(e) => handlePromptChange(Number(e.target.value))}
+                      className="w-full bg-space-900 border border-white/10 rounded-lg p-2.5 text-sm text-gray-300 outline-none appearance-none focus:border-neon-purple/50"
+                    >
+                      {prompts.map(p => (
+                        <option key={p.id} value={p.id}>{p.name}</option>
+                      ))}
+                    </select>
+                    <ChevronRight className="w-4 h-4 text-gray-500 absolute right-3 top-3 rotate-90 pointer-events-none" />
+                  </div>
+                  {selectedPrompt && (
+                    <p className="text-[10px] text-gray-500 mt-1.5 line-clamp-2">{selectedPrompt.description}</p>
+                  )}
+               </div>
+               <div>
+                  <label className="text-xs text-gray-400 block mb-2 font-medium">Model</label>
+                  <div className="relative">
+                    <select
+                      value={model}
+                      onChange={(e) => setModel(e.target.value)}
+                      className="w-full bg-space-900 border border-white/10 rounded-lg p-2.5 text-sm text-gray-300 outline-none appearance-none focus:border-neon-purple/50"
+                    >
+                      <option value="gpt-4o-mini">gpt-4o-mini</option>
+                      <option value="gpt-4o">gpt-4o</option>
+                      <option value="gpt-4-turbo">gpt-4-turbo</option>
+                      <option value="gpt-3.5-turbo">gpt-3.5-turbo</option>
+                    </select>
+                    <ChevronRight className="w-4 h-4 text-gray-500 absolute right-3 top-3 rotate-90 pointer-events-none" />
+                  </div>
+               </div>
                <div>
                  <div className="flex justify-between mb-2">
                     <label className="text-xs text-gray-400 font-medium">Temperature</label>
-                    <span className="text-xs text-neon-blue">0.7</span>
+                    <span className="text-xs text-neon-blue font-mono">{(temperature / 10).toFixed(1)}</span>
                  </div>
-                 <input type="range" className="w-full h-1 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-neon-purple" />
+                 <input
+                   type="range"
+                   min={0}
+                   max={10}
+                   value={temperature}
+                   onChange={(e) => setTemperature(Number(e.target.value))}
+                   className="w-full h-1 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-neon-purple"
+                 />
                  <div className="flex justify-between text-[10px] text-gray-600 mt-1 uppercase tracking-wider">
                    <span>Precise</span>
                    <span>Creative</span>
                  </div>
                </div>
-               <div>
-                  <label className="text-xs text-gray-400 block mb-2 font-medium">Active Prompt</label>
-                  <div className="relative">
-                    <select className="w-full bg-space-900 border border-white/10 rounded-lg p-2.5 text-sm text-gray-300 outline-none appearance-none focus:border-neon-purple/50">
-                        <option>Support Agent V1</option>
-                        <option>Billing Specialist</option>
-                    </select>
-                    <ChevronRight className="w-4 h-4 text-gray-500 absolute right-3 top-3 rotate-90 pointer-events-none" />
-                  </div>
-               </div>
             </div>
          </GlassCard>
-         
+
          <GlassCard className="p-6 flex-1 flex flex-col">
             <h3 className="text-white font-semibold mb-4 flex items-center gap-2">
                <Database className="w-4 h-4 text-neon-pink" />

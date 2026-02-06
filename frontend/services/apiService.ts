@@ -2,40 +2,6 @@ import { PromptVersion, PromptVersionCreate, PromptVersionUpdate, KnowledgeBaseI
 
 const API_BASE_URL = 'http://localhost:8000/api/v1';
 
-// Mock Data for fallback
-const MOCK_PROMPTS: PromptVersion[] = [
-  { id: 1, tenant_id: null, version: '1.0.0', name: 'Support Agent V1', description: 'Standard customer support responses', system_prompt: 'You are a helpful support agent...', context_template: 'Use the following context:\n{context}', task_template: 'Answer the following ticket:\n{ticket}', model: 'gpt-4o-mini', temperature: 3, max_tokens: 1000, is_active: false, is_default: true, performance_metrics: null, created_at: '2023-10-25T10:00:00Z', updated_at: '2023-10-25T10:00:00Z' },
-  { id: 2, tenant_id: null, version: '1.0.0', name: 'Billing Specialist', description: 'Handles refunds and invoicing', system_prompt: 'You are an expert in finance...', context_template: 'Use the following context:\n{context}', task_template: 'Handle the billing query:\n{ticket}', model: 'gpt-4o-mini', temperature: 3, max_tokens: 1000, is_active: false, is_default: false, performance_metrics: null, created_at: '2023-10-24T14:30:00Z', updated_at: '2023-10-24T14:30:00Z' },
-  { id: 3, tenant_id: null, version: '2.0.0', name: 'Technical Diagnostics', description: 'Deep dive into error logs', system_prompt: 'Analyze the following stack trace...', context_template: 'Use the following context:\n{context}', task_template: 'Diagnose the issue:\n{ticket}', model: 'gpt-4o', temperature: 5, max_tokens: 2000, is_active: false, is_default: false, performance_metrics: null, created_at: '2023-10-26T09:15:00Z', updated_at: '2023-10-26T09:15:00Z' },
-];
-
-const MOCK_KB: KnowledgeBaseItem[] = [
-  { id: '101', name: 'Product_Manual_v2.pdf', type: 'pdf', size: '2.4 MB', status: 'indexed', lastModified: '2023-10-01' },
-  { id: '102', name: 'Return_Policy.docx', type: 'docx', size: '450 KB', status: 'indexed', lastModified: '2023-09-15' },
-  { id: '103', name: 'Troubleshooting_Guide.txt', type: 'txt', size: '12 KB', status: 'indexing', lastModified: '2023-10-26' },
-];
-
-const MOCK_STATUS: SystemStatus = {
-  status: 'healthy',
-  uptime: '99.98%',
-  latency: 45,
-  activeAgents: 12
-};
-
-const MOCK_USER: User = {
-  id: 'u_123',
-  email: 'admin@demo.com',
-  name: 'Admin User',
-  tenant_id: 't_host_01',
-  role: 'admin'
-};
-
-// Helper to simulate delay
-const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
-
-// Helper to determine if we should use mock
-const shouldMock = false;
-
 const getHeaders = () => {
   const token = localStorage.getItem('auth_token');
   return {
@@ -111,32 +77,23 @@ export const apiService = {
   },
 
   getHealth: async (): Promise<SystemStatus> => {
-    if (shouldMock) {
-      await delay(500);
-      return MOCK_STATUS;
-    }
     try {
       const res = await fetch(`${API_BASE_URL}/health`, { headers: getHeaders() });
       if (!res.ok) throw new Error('Network response was not ok');
       return await res.json();
     } catch (e) {
-      console.warn('API fetch failed, returning mock data', e);
-      return MOCK_STATUS;
+      console.warn('Health check failed', e);
+      return { status: 'down', uptime: '-', latency: 0, activeAgents: 0 };
     }
   },
 
   getPrompts: async (): Promise<PromptVersion[]> => {
-    if (shouldMock) {
-      await delay(600);
-      return MOCK_PROMPTS;
+    const res = await fetch(`${API_BASE_URL}/prompts`, { headers: getHeaders() });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || 'Failed to fetch prompts');
     }
-    try {
-      const res = await fetch(`${API_BASE_URL}/prompts`, { headers: getHeaders() });
-      if (!res.ok) throw new Error('Network response was not ok');
-      return await res.json();
-    } catch (e) {
-      return MOCK_PROMPTS;
-    }
+    return await res.json();
   },
 
   getPrompt: async (id: number): Promise<PromptVersion> => {
@@ -215,24 +172,31 @@ export const apiService = {
   },
 
   getKnowledgeBase: async (): Promise<KnowledgeBaseItem[]> => {
-    if (shouldMock) {
-      await delay(700);
-      return MOCK_KB;
+    const res = await fetch(`${API_BASE_URL}/kb`, { headers: getHeaders() });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || 'Failed to fetch knowledge base');
     }
-    try {
-      const res = await fetch(`${API_BASE_URL}/kb`, { headers: getHeaders() });
-      if (!res.ok) throw new Error('Network response was not ok');
-      return await res.json();
-    } catch (e) {
-      return MOCK_KB;
-    }
+    return await res.json();
   },
 
-  generateReply: async (text: string): Promise<ChatMessage> => {
+  generateReply: async (
+    text: string,
+    promptId?: number | null,
+    temperature?: number,
+    model?: string
+  ): Promise<ChatMessage> => {
     const res = await fetch(`${API_BASE_URL}/playground/generate`, {
       method: 'POST',
       headers: getHeaders(),
-      body: JSON.stringify({ subject: 'Playground Query', content: text, use_reranking: true }),
+      body: JSON.stringify({
+        subject: 'Playground Query',
+        content: text,
+        use_reranking: true,
+        prompt_id: promptId || undefined,
+        temperature: temperature !== undefined ? temperature : undefined,
+        model: model || undefined,
+      }),
     });
 
     if (!res.ok) {

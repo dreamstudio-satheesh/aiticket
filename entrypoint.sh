@@ -4,7 +4,11 @@ set -e
 echo "==> Initializing database tables..."
 python init_database.py
 
-# Only seed if DB is fresh (no tenants exist yet = new volume)
+# Always seed prompts (idempotent - skips existing)
+echo "==> Ensuring default prompts exist..."
+python seed_prompts.py
+
+# Only seed users/tenant if DB is fresh
 TENANT_COUNT=$(python -c "
 from app.db.session import SessionLocal
 from app.models import Tenant
@@ -14,11 +18,10 @@ db.close()
 ")
 
 if [ "$TENANT_COUNT" = "0" ]; then
-  echo "==> Fresh database detected, seeding..."
-  python seed_prompts.py
+  echo "==> Fresh database detected, seeding demo tenant..."
   python seed_users.py
 else
-  echo "==> Database already seeded ($TENANT_COUNT tenants), skipping."
+  echo "==> Database has $TENANT_COUNT tenant(s), skipping user seed."
 fi
 
 echo "==> Starting server..."

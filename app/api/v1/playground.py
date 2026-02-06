@@ -29,7 +29,14 @@ def playground_generate(
         status=TicketStatus.OPEN,
     )
 
-    rag = generate_reply(db, ticket, use_reranking=req.use_reranking)
+    rag = generate_reply(
+        db,
+        ticket,
+        use_reranking=req.use_reranking,
+        prompt_id=req.prompt_id,
+        override_model=req.model,
+        override_temperature=req.temperature,
+    )
 
     # Map context sources for frontend
     context_sources = []

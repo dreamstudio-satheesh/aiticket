@@ -95,9 +95,17 @@ def generate_reply(
     ticket: Ticket,
     top_k: int = 5,
     use_reranking: bool = True,
+    prompt_id: int = None,
+    override_model: str = None,
+    override_temperature: int = None,
 ) -> RAGResponse:
     """
     Main RAG pipeline: retrieve context, rerank, generate reply with confidence scoring.
+
+    Args:
+        prompt_id: Optional prompt version ID to use instead of active prompt
+        override_model: Optional model override (e.g., 'gpt-4o', 'gpt-4o-mini')
+        override_temperature: Optional temperature override (0-10, divide by 10)
     """
     tenant_id = ticket.tenant_id
 
@@ -125,15 +133,21 @@ def generate_reply(
         ticket_content=ticket.content
     )
 
-    # 4. Get active prompt version
-    prompt_version = get_active_prompt(db, tenant_id)
+    # 4. Get prompt version (specific ID or active)
+    if prompt_id:
+        from app.models import PromptVersion
+        prompt_version = db.query(PromptVersion).filter(PromptVersion.id == prompt_id).first()
+    else:
+        prompt_version = get_active_prompt(db, tenant_id)
 
     # 5. Build prompts
     system_prompt, user_prompt = build_prompt(ticket, context, prompt_version)
 
-    # 6. Generate reply
-    model = prompt_version.model if prompt_version else "gpt-4o-mini"
-    temperature = (prompt_version.temperature / 10) if prompt_version else 0.3
+    # 6. Generate reply with optional overrides
+    model = override_model or (prompt_version.model if prompt_version else "gpt-4o-mini")
+    temperature = (override_temperature / 10) if override_temperature is not None else (
+        (prompt_version.temperature / 10) if prompt_version else 0.3
+    )
     max_tokens = prompt_version.max_tokens if prompt_version else 1000
 
     llm_response = generate_completion(
